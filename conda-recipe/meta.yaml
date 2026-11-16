@@ -1,0 +1,61 @@
+{% set name = "cnv-vaf-validator" %}
+{% set version = "1.0.0" %}
+
+package:
+  name: {{ name }}
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  script: bash conda-recipe/build.sh
+
+requirements:
+  host:
+    - python >=3.10
+    - numpy >=2.0
+    - pandas >=2.0
+    - scikit-learn >=1.7,<1.8
+    - joblib >=1.4
+    - matplotlib-base >=3.8
+    - pillow >=10
+  run:
+    - python >=3.10
+    - numpy >=2.0
+    - pandas >=2.0
+    - scikit-learn >=1.7,<1.8
+    - joblib >=1.4
+    - matplotlib-base >=3.8
+    - pillow >=10
+    - pytorch >=2.0
+    - bcftools >=1.17
+    - samtools >=1.20
+
+test:
+  commands:
+    - cnv-vaf-validator --version
+    - cnv-vaf-validator.py --version
+    - cnv-vaf-validator --help
+    - python -c "import joblib, matplotlib, numpy, pandas, PIL, sklearn, torch; assert hasattr(numpy, 'trapezoid')"
+    - bcftools --version
+    - samtools --version
+    - test -s "$PREFIX/share/cnv-vaf-validator/hg38_centromeres_telomeres.bed"
+    - test -s "$PREFIX/share/cnv-vaf-validator/models/CNN_coverage.pt"
+    - python -c "import joblib, sys; from sklearn.svm import SVC; model = joblib.load(sys.argv[1]); params = model.get_params(deep=False); assert isinstance(model, SVC); assert params['C'] == 1.0 and params['class_weight'] is None and params['coef0'] == 0.0 and params['gamma'] == 'scale' and params['kernel'] == 'sigmoid'; assert model.probability is True; assert model.feature_names_in_.tolist() == ['X0.5', 'X1', 'X0.33_X0.66']; assert model.classes_.tolist() == [0, 1, 2]" "$PREFIX/share/cnv-vaf-validator/models/svc_vaf.pkl"
+    - python -c "import csv, sys; rows = list(csv.DictReader(open(sys.argv[1], encoding='utf-8'), delimiter='\t')); assert rows; assert set(rows[0]) == {'SVTYPE', 'X0.33_X0.66', 'X0.5', 'X1'}; assert {row['SVTYPE'] for row in rows} <= {'DEL', 'DIP', 'DUP'}" "$PREFIX/share/cnv-vaf-validator/data/VAF_train.tsv"
+    - test -s "$PREFIX/share/cnv-vaf-validator/example/ClinCNV_output_chr22.tsv"
+    - test -s "$PREFIX/share/cnv-vaf-validator/example/HG00577_example.cram"
+    - test -s "$PREFIX/share/cnv-vaf-validator/example/HG00577_example.vcf.gz"
+
+about:
+  summary: VAF-based CNV validation and local coverage profile generation
+  description: |
+    A command-line tool that extracts VAF distributions from VCF files,
+    applies a bundled SVC model, annotates centromeric and
+    telomeric CNVs, and plots BAM/CRAM coverage profiles with samtools.
+  license: LicenseRef-Not-Specified
+  license_family: OTHER
+extra:
+  recipe-maintainers: []

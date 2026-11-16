@@ -1,0 +1,15 @@
+name: cnv-vaf-validator
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - numpy>=2.0
+  - pandas>=2.0
+  - scikit-learn=1.7.0
+  - joblib>=1.4
+  - matplotlib-base>=3.8
+  - pillow>=10
+  - pytorch>=2.0
+  - bcftools>=1.17
+  - samtools>=1.20
