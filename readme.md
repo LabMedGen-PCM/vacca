@@ -1,4 +1,4 @@
-# Vacca 1.0.0
+# vacca 1.0.0
 
 **V**ariant **A**llele frequency and **C**overage-based **C**NV **A**ssessment.
 
