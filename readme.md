@@ -22,13 +22,26 @@ mamba install "mkl<2026.2"
 
 ## Installation
 
-0) In order to install this tool, you need to have `mamba>=2.5.0`.
+0) In order to install this tool, you need to have `mamba>=2.5.0`. Git LFS is also required to download the bundled example CRAM (the tool can run perfeclty fine without it, but you won't be able to vacca --test-run). If you would like to first test-run the tool, install and configure it before cloning the repository:
+
+```bash
+mamba install -n base -c conda-forge git-lfs
+git lfs install
+```
 
 1) Clone this repository:
 
 ```bash
 git clone http://git.ripcm.com/azimin/vacca
 ```
+
+Download the bundled Git LFS files before running the installer:
+
+```bash
+git -C vacca lfs pull
+```
+
+For an existing clone, install and configure Git LFS as shown above, then run this command before installing or updating Vacca.
 
 2) Run the installer to download the required packages and create or update the `vacca` environment:
 
