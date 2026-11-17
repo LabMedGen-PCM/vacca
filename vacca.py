@@ -1278,8 +1278,8 @@ def bundled_asset_candidates(*parts: str) -> tuple[Path, ...]:
     relative = Path(*parts)
     return (
         script_path.parent / relative,
-        script_path.parent.parent / "share" / "cnv-vaf-validator" / relative,
-        Path(sys.prefix) / "share" / "cnv-vaf-validator" / relative,
+        script_path.parent.parent / "share" / "vacca" / relative,
+        Path(sys.prefix) / "share" / "vacca" / relative,
     )
 
 
@@ -3302,7 +3302,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     VERBOSE_ENABLED = args.verbose
     vprint(
-        f"Starting cnv-vaf-validator {VERSION}: mode={args.mode}, "
+        f"Starting vacca {VERSION}: mode={args.mode}, "
         f"threads={args.threads}"
     )
 
@@ -3562,7 +3562,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     nn_result: pd.DataFrame | None = None
     if args.nn_validation:
         vprint("Starting CNN validation stage")
-        with tempfile.TemporaryDirectory(prefix="cnv-vaf-validator-cnn-") as temporary_dir:
+        with tempfile.TemporaryDirectory(prefix="vacca-cnn-") as temporary_dir:
             try:
                 nn_result = run_nn_validation(
                     frame,

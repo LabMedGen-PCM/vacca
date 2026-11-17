@@ -1,20 +1,20 @@
-# CNV VAF Validator 1.0.0 — command reference
+# Vacca 1.0.0 — command reference
 
-This document describes `cnv_vaf_validator.py` version **1.0.0**.
+This document describes `vacca` version **1.0.0** — **V**ariant **A**llele frequency and **C**overage-based **C**NV **A**ssessment.
 
 ## Installation
 
 ```bash
 bash install.sh
-mamba activate cnv-vaf-validator
+mamba activate vacca
 ```
 
-The installer creates or updates the `cnv-vaf-validator` Conda environment and installs the equivalent commands `cnv-vaf-validator` and `cnv-vaf-validator.py`. See `readme.md` for installation prerequisites, manual environment creation, and troubleshooting.
+The installer downloads the required packages, creates or updates the `vacca` Conda environment, and installs the `vacca` command. See `readme.md` for installation prerequisites, manual environment creation, and troubleshooting.
 
 ## Built-in test run
 
 ```bash
-cnv-vaf-validator.py --test-run
+vacca --test-run
 ```
 
 The test runs VAF and CNN validation on the bundled ClinCNV, VCF, and CRAM data and writes:
@@ -54,7 +54,7 @@ At least one validation model must be enabled in `--mode validate`. The legacy s
 ### Multi-sample VAF with default coverage profiles
 
 ```bash
-cnv-vaf-validator.py \
+vacca \
   --cnvs CALLS.tsv \
   --vcf-dir VCF_DIR \
   --alignment-dir ALIGNMENT_DIR \
@@ -64,7 +64,7 @@ cnv-vaf-validator.py \
 ### Multi-sample VAF without profiles
 
 ```bash
-cnv-vaf-validator.py \
+vacca \
   --cnvs CALLS.tsv \
   --vcf-dir VCF_DIR \
   --output OUTPUT_DIR \
@@ -74,7 +74,7 @@ cnv-vaf-validator.py \
 ### CNN only
 
 ```bash
-cnv-vaf-validator.py \
+vacca \
   --cnvs CALLS.tsv \
   --vaf-validation false \
   --cnn-validation true \
@@ -85,7 +85,7 @@ cnv-vaf-validator.py \
 ### VAF and CNN
 
 ```bash
-cnv-vaf-validator.py \
+vacca \
   --cnvs CALLS.tsv \
   --vcf-dir VCF_DIR \
   --alignment-dir ALIGNMENT_DIR \
@@ -96,7 +96,7 @@ cnv-vaf-validator.py \
 ### Multi-sample ClinCNV/Manta manifest
 
 ```bash
-cnv-vaf-validator.py --cnvs samples.tsv --cnn-validation true --output OUTPUT_DIR
+vacca --cnvs samples.tsv --cnn-validation true --output OUTPUT_DIR
 ```
 
 The manifest supplies CNV, VCF, and BAM/CRAM paths.
@@ -104,7 +104,7 @@ The manifest supplies CNV, VCF, and BAM/CRAM paths.
 ### Single-sample validation
 
 ```bash
-cnv-vaf-validator.py \
+vacca \
   --cnvs CALLS_OR_CALLER_OUTPUT \
   --vcf-path SAMPLE.small_variants.vcf.gz \
   --alignment-path SAMPLE.cram \
@@ -116,7 +116,7 @@ For CNN-only, omit `--vcf-path` and set `--vaf-validation false --cnn-validation
 ### One explicit CNV
 
 ```bash
-cnv-vaf-validator.py \
+vacca \
   --chr chr1 --start 100000 --end 200000 --svtype DEL \
   --vcf-path SAMPLE.small_variants.vcf.gz \
   --alignment-path SAMPLE.cram \
@@ -126,7 +126,7 @@ cnv-vaf-validator.py \
 ### Coverage only
 
 ```bash
-cnv-vaf-validator.py \
+vacca \
   --mode plot-cov \
   --cnvs CALLS.tsv \
   --alignment-dir ALIGNMENT_DIR \
@@ -378,4 +378,4 @@ For very large regions, per-base rendering automatically falls back to median co
 | `--legend true|false` | Show axes, ticks, labels, and grid; default `true`. |
 | `--cnv-borders true|false` | Draw CNV boundaries; default `true`. |
 
-Run `cnv-vaf-validator.py --help` for argparse-generated usage.
+Run `vacca --help` for argparse-generated usage.

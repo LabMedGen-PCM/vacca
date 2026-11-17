@@ -1,4 +1,4 @@
-name: cnv-vaf-validator
+name: vacca
 channels:
   - conda-forge
   - bioconda

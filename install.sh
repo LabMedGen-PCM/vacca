@@ -2,43 +2,28 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_NAME="${CNV_VALIDATOR_ENV:-cnv-vaf-validator}"
-HEARTBEAT_SECONDS="${CNV_INSTALL_HEARTBEAT:-15}"
-INSTALL_LOG="${CNV_INSTALL_LOG:-$ROOT_DIR/install.log}"
-PACKED_ENV_ARCHIVE="${CNV_PACKED_ENV_ARCHIVE:-$ROOT_DIR/dependencies/cnv-vaf-validator.tar.gz}"
-ENV_INSTALL_RETRIES="${CNV_INSTALL_RETRIES_BEFORE_FALLBACK:-0}"
-INSTALL_MODE="local"
-PACKED_FALLBACK_USED=false
-PACKED_PREFIX=""
+ENV_NAME="${VACCA_ENV:-vacca}"
+HEARTBEAT_SECONDS="${VACCA_INSTALL_HEARTBEAT:-15}"
+INSTALL_LOG="${VACCA_INSTALL_LOG:-$ROOT_DIR/install.log}"
 
 usage() {
   cat <<'EOF'
-Usage: bash install.sh [--local | --online]
+Usage: bash install.sh
 
-Installation modes:
-  --local   Install directly from dependencies/cnv-vaf-validator.tar.gz.
-            This is the default mode and does not download packages.
-  --online  First try to create/update the environment from environment.yml.
-            If that fails, fall back to the bundled local archive.
+Create or update the environment from environment.yml, downloading required packages.
 
-Other options:
+Options:
   -h, --help  Show this help message and exit.
 
 Environment variables:
-  CNV_VALIDATOR_ENV                    Target environment name.
-  CNV_PACKED_ENV_ARCHIVE               Alternative conda-pack archive path.
-  CNV_INSTALL_RETRIES_BEFORE_FALLBACK  Online retries before local fallback.
+  VACCA_ENV                Target environment name (default: vacca).
+  VACCA_INSTALL_HEARTBEAT   Progress heartbeat interval in seconds.
+  VACCA_INSTALL_LOG         Installation log path.
 EOF
 }
 
 while (( $# > 0 )); do
   case "$1" in
-    --local)
-      INSTALL_MODE="local"
-      ;;
-    --online)
-      INSTALL_MODE="online"
-      ;;
     -h|--help)
       usage
       exit 0
@@ -63,15 +48,11 @@ CURRENT_STEP=0
 CURRENT_STEP_NAME="initialization"
 
 if [[ ! "$HEARTBEAT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
-  printf 'Error: CNV_INSTALL_HEARTBEAT must be a positive integer.\n' >&2
-  exit 2
-fi
-if [[ ! "$ENV_INSTALL_RETRIES" =~ ^[0-9]+$ ]]; then
-  printf 'Error: CNV_INSTALL_RETRIES_BEFORE_FALLBACK must be a non-negative integer.\n' >&2
+  printf 'Error: VACCA_INSTALL_HEARTBEAT must be a positive integer.\n' >&2
   exit 2
 fi
 
-# Start a fresh log on every run. Set CNV_INSTALL_LOG to save it elsewhere.
+# Start a fresh log on every run. Set VACCA_INSTALL_LOG to save it elsewhere.
 : > "$INSTALL_LOG"
 
 color_enabled=false
@@ -206,134 +187,6 @@ find_manager() {
   return 1
 }
 
-resolve_packed_environment_prefix() {
-  local root_prefix="" candidate="" manager_path=""
-
-  # Prefer explicit prefixes. Validate every candidate before accepting it:
-  # some Mamba versions print an error message to stdout for unsupported
-  # info options, which must not be mistaken for a filesystem path.
-  if [[ -n "${MAMBA_ROOT_PREFIX:-}" && -d "$MAMBA_ROOT_PREFIX" ]]; then
-    root_prefix="$MAMBA_ROOT_PREFIX"
-  fi
-  if [[ -z "$root_prefix" && -n "${CONDA_EXE:-}" ]]; then
-    candidate="$(cd "$(dirname "$CONDA_EXE")/.." 2>/dev/null && pwd || true)"
-    if [[ -n "$candidate" && -d "$candidate" ]]; then
-      root_prefix="$candidate"
-    fi
-  fi
-  if [[ -z "$root_prefix" ]]; then
-    manager_path="$(command -v "$MANAGER")"
-    candidate="$(cd "$(dirname "$manager_path")/.." 2>/dev/null && pwd || true)"
-    if [[ -n "$candidate" && -d "$candidate" ]]; then
-      root_prefix="$candidate"
-    fi
-  fi
-  if [[ -z "$root_prefix" ]]; then
-    candidate="$("$MANAGER" info --base 2>/dev/null | tail -n 1 || true)"
-    if [[ -n "$candidate" && -d "$candidate" ]]; then
-      root_prefix="$candidate"
-    fi
-  fi
-  if [[ -z "$root_prefix" ]]; then
-    candidate="$("$MANAGER" info --root-prefix 2>/dev/null | tail -n 1 || true)"
-    if [[ -n "$candidate" && -d "$candidate" ]]; then
-      root_prefix="$candidate"
-    fi
-  fi
-
-  if [[ -z "$root_prefix" || ! -d "$root_prefix" ]]; then
-    log "${RED}Error: failed to resolve the Conda/Mamba root prefix for the packed-environment fallback.${RESET}"
-    return 4
-  fi
-
-  printf '%s/envs/%s\n' "${root_prefix%/}" "$ENV_NAME"
-}
-
-restore_after_packed_failure() {
-  local target="$1"
-  local backup="$2"
-  local failed="${target}.packed-failed-$(date +%Y%m%d-%H%M%S)"
-
-  if [[ -e "$target" ]]; then
-    mv -- "$target" "$failed"
-    log "Failed packed environment preserved at: $failed"
-  fi
-  if [[ -n "$backup" && -e "$backup" ]]; then
-    mv -- "$backup" "$target"
-    log "Previous environment restored at: $target"
-  fi
-}
-
-install_packed_environment() {
-  local target parent temporary backup=""
-  local timestamp
-
-  if [[ ! -r "$PACKED_ENV_ARCHIVE" ]]; then
-    log "${RED}Error: packed fallback archive is missing or unreadable: $PACKED_ENV_ARCHIVE${RESET}"
-    return 4
-  fi
-  if ! command -v tar >/dev/null 2>&1; then
-    log "${RED}Error: tar is required to install the packed fallback environment.${RESET}"
-    return 4
-  fi
-
-  target="$(resolve_packed_environment_prefix)"
-  parent="$(dirname "$target")"
-  temporary="${target}.packed-tmp.$$"
-  timestamp="$(date +%Y%m%d-%H%M%S)"
-
-  mkdir -p "$parent"
-  if [[ -e "$temporary" ]]; then
-    log "${RED}Error: temporary fallback path already exists: $temporary${RESET}"
-    return 4
-  fi
-  mkdir -p "$temporary"
-
-  if [[ "$INSTALL_MODE" == "online" ]]; then
-    log "Normal Conda/Mamba installation failed; using the bundled conda-pack environment."
-  else
-    log "Installing directly from the bundled conda-pack environment."
-  fi
-  log "Packed environment archive: $PACKED_ENV_ARCHIVE"
-  log "Packed environment target: $target"
-  if ! run_visible tar -xzf "$PACKED_ENV_ARCHIVE" -C "$temporary"; then
-    log "${RED}Error: failed to extract the packed environment.${RESET}"
-    log "Incomplete extraction preserved at: $temporary"
-    return 4
-  fi
-
-  if [[ ! -x "$temporary/bin/python" || ! -d "$temporary/conda-meta" ]]; then
-    log "${RED}Error: the packed archive does not look like a complete Conda environment.${RESET}"
-    log "Extracted files preserved at: $temporary"
-    return 4
-  fi
-
-  if [[ -e "$target" ]]; then
-    backup="${target}.pre-packed-backup-${timestamp}"
-    mv -- "$target" "$backup"
-    log "Existing or partially created environment backed up to: $backup"
-  fi
-  mv -- "$temporary" "$target"
-
-  if [[ ! -x "$target/bin/conda-unpack" ]]; then
-    log "${RED}Error: conda-unpack is absent from the packed environment.${RESET}"
-    restore_after_packed_failure "$target" "$backup"
-    return 4
-  fi
-  if ! run_visible "$target/bin/conda-unpack"; then
-    log "${RED}Error: conda-unpack failed for the packed environment.${RESET}"
-    restore_after_packed_failure "$target" "$backup"
-    return 4
-  fi
-
-  PACKED_FALLBACK_USED=true
-  PACKED_PREFIX="$target"
-  log "Bundled conda-pack environment installed successfully."
-  if [[ -n "$backup" ]]; then
-    log "Previous environment backup retained at: $backup"
-  fi
-}
-
 begin_step "checking prerequisites"
 MANAGER="$(find_manager || true)"
 if [[ -z "$MANAGER" ]]; then
@@ -345,8 +198,6 @@ if [[ "$MANAGER" == "mamba" || "$MANAGER" == "micromamba" ]]; then
   log "Mamba download settings: threads=$MAMBA_DOWNLOAD_THREADS, retries=$MAMBA_REMOTE_MAX_RETRIES, backoff=$MAMBA_REMOTE_BACKOFF_FACTOR"
 fi
 log "Target environment: $ENV_NAME"
-log "Installation mode: $INSTALL_MODE"
-log "Normal installation retries before packed fallback: $ENV_INSTALL_RETRIES"
 log "Installer directory: $ROOT_DIR"
 log "Log file: $INSTALL_LOG"
 finish_step
@@ -355,97 +206,67 @@ begin_step "checking the target Conda environment"
 ENV_EXISTS=false
 if "$MANAGER" env list 2>/dev/null | awk '{print $1}' | grep -Fxq "$ENV_NAME"; then
   ENV_EXISTS=true
-  if [[ "$INSTALL_MODE" == "local" ]]; then
-    log "Environment '$ENV_NAME' already exists and will be replaced from the bundled archive."
-  else
-    log "Environment '$ENV_NAME' already exists and will be updated."
-  fi
+  log "Environment '$ENV_NAME' already exists and will be updated."
 else
-  if [[ "$INSTALL_MODE" == "local" ]]; then
-    log "Environment '$ENV_NAME' does not exist and will be installed from the bundled archive."
-  else
-    log "Environment '$ENV_NAME' does not exist and will be created."
-  fi
+  log "Environment '$ENV_NAME' does not exist and will be created."
 fi
 finish_step
 
 begin_step "creating or updating the Conda environment"
-if [[ "$INSTALL_MODE" == "local" ]]; then
-  install_packed_environment
+if $ENV_EXISTS; then
+  run_visible "$MANAGER" env update -y -n "$ENV_NAME" -f "$ROOT_DIR/environment.yml" --prune
 else
-  if $ENV_EXISTS; then
-    if ! run_visible env \
-      MAMBA_REMOTE_MAX_RETRIES="$ENV_INSTALL_RETRIES" \
-      CONDA_REMOTE_MAX_RETRIES="$ENV_INSTALL_RETRIES" \
-      "$MANAGER" env update -y -n "$ENV_NAME" -f "$ROOT_DIR/environment.yml" --prune; then
-      install_packed_environment
-    fi
-  else
-    if ! run_visible env \
-      MAMBA_REMOTE_MAX_RETRIES="$ENV_INSTALL_RETRIES" \
-      CONDA_REMOTE_MAX_RETRIES="$ENV_INSTALL_RETRIES" \
-      "$MANAGER" env create -y -n "$ENV_NAME" -f "$ROOT_DIR/environment.yml"; then
-      install_packed_environment
-    fi
-  fi
+  run_visible "$MANAGER" env create -y -n "$ENV_NAME" -f "$ROOT_DIR/environment.yml"
 fi
 finish_step
 
 begin_step "resolving the environment installation prefix"
-if $PACKED_FALLBACK_USED; then
-  PREFIX="$PACKED_PREFIX"
-  log "Using packed environment prefix: $PREFIX"
-else
-  print_command "$MANAGER" run -n "$ENV_NAME" python -c 'import sys; print(sys.prefix)'
-  PREFIX="$($MANAGER run -n "$ENV_NAME" python -c 'import sys; print(sys.prefix)')"
-fi
+print_command "$MANAGER" run -n "$ENV_NAME" python -c 'import sys; print(sys.prefix)'
+PREFIX="$($MANAGER run -n "$ENV_NAME" python -c 'import sys; print(sys.prefix)')"
 if [[ -z "$PREFIX" || ! -d "$PREFIX" ]]; then
   log "${RED}Error: failed to resolve a valid environment prefix.${RESET}"
   exit 3
 fi
 log "Environment prefix: $PREFIX"
-mkdir -p "$PREFIX/bin" "$PREFIX/share/doc/cnv-vaf-validator" \
-  "$PREFIX/share/cnv-vaf-validator/models" "$PREFIX/share/cnv-vaf-validator/data" \
-  "$PREFIX/share/cnv-vaf-validator/example"
+mkdir -p "$PREFIX/bin" "$PREFIX/share/doc/vacca" \
+  "$PREFIX/share/vacca/models" "$PREFIX/share/vacca/data" \
+  "$PREFIX/share/vacca/example"
 finish_step
 
 begin_step "installing the validator and documentation"
-install -m 0755 "$ROOT_DIR/cnv_vaf_validator.py" "$PREFIX/bin/cnv-vaf-validator"
-install -m 0755 "$ROOT_DIR/cnv_vaf_validator.py" "$PREFIX/bin/cnv-vaf-validator.py"
-install -m 0644 "$ROOT_DIR/readme.md" "$PREFIX/share/doc/cnv-vaf-validator/readme.md"
-install -m 0644 "$ROOT_DIR/help.md" "$PREFIX/share/doc/cnv-vaf-validator/help.md"
+install -m 0755 "$ROOT_DIR/vacca.py" "$PREFIX/bin/vacca"
+install -m 0644 "$ROOT_DIR/readme.md" "$PREFIX/share/doc/vacca/readme.md"
+install -m 0644 "$ROOT_DIR/help.md" "$PREFIX/share/doc/vacca/help.md"
 install -m 0644 "$ROOT_DIR/hg38_centromeres_telomeres.bed" \
-  "$PREFIX/share/cnv-vaf-validator/hg38_centromeres_telomeres.bed"
+  "$PREFIX/share/vacca/hg38_centromeres_telomeres.bed"
 install -m 0644 "$ROOT_DIR/models/CNN_coverage.pt" \
-  "$PREFIX/share/cnv-vaf-validator/models/CNN_coverage.pt"
+  "$PREFIX/share/vacca/models/CNN_coverage.pt"
 install -m 0644 "$ROOT_DIR/models/svc_vaf.pkl" \
-  "$PREFIX/share/cnv-vaf-validator/models/svc_vaf.pkl"
+  "$PREFIX/share/vacca/models/svc_vaf.pkl"
 install -m 0644 "$ROOT_DIR/data/VAF_train.tsv" \
-  "$PREFIX/share/cnv-vaf-validator/data/VAF_train.tsv"
+  "$PREFIX/share/vacca/data/VAF_train.tsv"
 install -m 0644 "$ROOT_DIR/example/"* \
-  "$PREFIX/share/cnv-vaf-validator/example/"
-log "Installed command: $PREFIX/bin/cnv-vaf-validator"
-log "Installed alias: $PREFIX/bin/cnv-vaf-validator.py"
-log "Installed documentation: $PREFIX/share/doc/cnv-vaf-validator"
-log "Installed annotation BED: $PREFIX/share/cnv-vaf-validator/hg38_centromeres_telomeres.bed"
-log "Installed CNN checkpoint: $PREFIX/share/cnv-vaf-validator/models/CNN_coverage.pt"
-log "Installed VAF SVC model: $PREFIX/share/cnv-vaf-validator/models/svc_vaf.pkl"
-log "Installed VAF training table: $PREFIX/share/cnv-vaf-validator/data/VAF_train.tsv"
-log "Installed examples: $PREFIX/share/cnv-vaf-validator/example"
+  "$PREFIX/share/vacca/example/"
+log "Installed command: $PREFIX/bin/vacca"
+log "Installed documentation: $PREFIX/share/doc/vacca"
+log "Installed annotation BED: $PREFIX/share/vacca/hg38_centromeres_telomeres.bed"
+log "Installed CNN checkpoint: $PREFIX/share/vacca/models/CNN_coverage.pt"
+log "Installed VAF SVC model: $PREFIX/share/vacca/models/svc_vaf.pkl"
+log "Installed VAF training table: $PREFIX/share/vacca/data/VAF_train.tsv"
+log "Installed examples: $PREFIX/share/vacca/example"
 finish_step
 
 begin_step "running installation self-tests"
-run_visible "$MANAGER" run -n "$ENV_NAME" cnv-vaf-validator --version
-run_visible "$MANAGER" run -n "$ENV_NAME" cnv-vaf-validator.py --version
-run_visible "$MANAGER" run -n "$ENV_NAME" cnv-vaf-validator --help
+run_visible "$MANAGER" run -n "$ENV_NAME" vacca --version
+run_visible "$MANAGER" run -n "$ENV_NAME" vacca --help
 run_visible "$MANAGER" run -n "$ENV_NAME" python -c 'import joblib, matplotlib, numpy, pandas, PIL, sklearn, torch; assert hasattr(numpy, "trapezoid"); print("Python dependencies: OK")'
 run_visible "$MANAGER" run -n "$ENV_NAME" bcftools --version
 run_visible "$MANAGER" run -n "$ENV_NAME" samtools --version
-run_visible "$MANAGER" run -n "$ENV_NAME" python -c 'from pathlib import Path; import sys; path = Path(sys.argv[1]); rows = [line for line in path.read_text().splitlines() if line and not line.startswith("#")]; assert rows and all(len(line.split("\t")) >= 4 for line in rows); print(f"Annotation BED: OK ({len(rows)} intervals)")' "$PREFIX/share/cnv-vaf-validator/hg38_centromeres_telomeres.bed"
-run_visible "$MANAGER" run -n "$ENV_NAME" python -c 'from pathlib import Path; import sys; path = Path(sys.argv[1]); assert path.stat().st_size > 0; print("CNN checkpoint: OK")' "$PREFIX/share/cnv-vaf-validator/models/CNN_coverage.pt"
-run_visible "$MANAGER" run -n "$ENV_NAME" python -c 'import joblib, sys; from sklearn.svm import SVC; model = joblib.load(sys.argv[1]); params = model.get_params(deep=False); assert isinstance(model, SVC); assert params["C"] == 1.0 and params["class_weight"] is None and params["coef0"] == 0.0 and params["gamma"] == "scale" and params["kernel"] == "sigmoid"; assert model.probability is True; assert model.feature_names_in_.tolist() == ["X0.5", "X1", "X0.33_X0.66"]; assert model.classes_.tolist() == [0, 1, 2]; print("VAF SVC model: OK")' "$PREFIX/share/cnv-vaf-validator/models/svc_vaf.pkl"
-run_visible "$MANAGER" run -n "$ENV_NAME" python -c 'import csv, sys; rows = list(csv.DictReader(open(sys.argv[1], encoding="utf-8"), delimiter="\t")); assert rows; assert set(rows[0]) == {"SVTYPE", "X0.33_X0.66", "X0.5", "X1"}; assert {row["SVTYPE"] for row in rows} <= {"DEL", "DIP", "DUP"}; print(f"VAF training table: OK ({len(rows)} rows)")' "$PREFIX/share/cnv-vaf-validator/data/VAF_train.tsv"
-run_visible "$MANAGER" run -n "$ENV_NAME" python -c 'from pathlib import Path; import sys; root = Path(sys.argv[1]); required = ["ClinCNV_output_chr22.tsv", "HG00577_example.cram", "HG00577_example.vcf.gz"]; assert all((root / name).is_file() for name in required); print("Bundled examples: OK")' "$PREFIX/share/cnv-vaf-validator/example"
+run_visible "$MANAGER" run -n "$ENV_NAME" python -c 'from pathlib import Path; import sys; path = Path(sys.argv[1]); rows = [line for line in path.read_text().splitlines() if line and not line.startswith("#")]; assert rows and all(len(line.split("\t")) >= 4 for line in rows); print(f"Annotation BED: OK ({len(rows)} intervals)")' "$PREFIX/share/vacca/hg38_centromeres_telomeres.bed"
+run_visible "$MANAGER" run -n "$ENV_NAME" python -c 'from pathlib import Path; import sys; path = Path(sys.argv[1]); assert path.stat().st_size > 0; print("CNN checkpoint: OK")' "$PREFIX/share/vacca/models/CNN_coverage.pt"
+run_visible "$MANAGER" run -n "$ENV_NAME" python -c 'import joblib, sys; from sklearn.svm import SVC; model = joblib.load(sys.argv[1]); params = model.get_params(deep=False); assert isinstance(model, SVC); assert params["C"] == 1.0 and params["class_weight"] is None and params["coef0"] == 0.0 and params["gamma"] == "scale" and params["kernel"] == "sigmoid"; assert model.probability is True; assert model.feature_names_in_.tolist() == ["X0.5", "X1", "X0.33_X0.66"]; assert model.classes_.tolist() == [0, 1, 2]; print("VAF SVC model: OK")' "$PREFIX/share/vacca/models/svc_vaf.pkl"
+run_visible "$MANAGER" run -n "$ENV_NAME" python -c 'import csv, sys; rows = list(csv.DictReader(open(sys.argv[1], encoding="utf-8"), delimiter="\t")); assert rows; assert set(rows[0]) == {"SVTYPE", "X0.33_X0.66", "X0.5", "X1"}; assert {row["SVTYPE"] for row in rows} <= {"DEL", "DIP", "DUP"}; print(f"VAF training table: OK ({len(rows)} rows)")' "$PREFIX/share/vacca/data/VAF_train.tsv"
+run_visible "$MANAGER" run -n "$ENV_NAME" python -c 'from pathlib import Path; import sys; root = Path(sys.argv[1]); required = ["ClinCNV_output_chr22.tsv", "HG00577_example.cram", "HG00577_example.vcf.gz"]; assert all((root / name).is_file() for name in required); print("Bundled examples: OK")' "$PREFIX/share/vacca/example"
 finish_step
 
 log ""
@@ -455,12 +276,11 @@ log "Activate the environment:"
 log "  $MANAGER activate $ENV_NAME"
 log ""
 log "Commands:"
-log "  cnv-vaf-validator --help"
-log "  cnv-vaf-validator.py --help"
+log "  vacca --help"
 log ""
 log "Documentation:"
-log "  $PREFIX/share/doc/cnv-vaf-validator/readme.md"
-log "  $PREFIX/share/doc/cnv-vaf-validator/help.md"
+log "  $PREFIX/share/doc/vacca/readme.md"
+log "  $PREFIX/share/doc/vacca/help.md"
 log ""
 log "Full installation log:"
 log "  $INSTALL_LOG"
