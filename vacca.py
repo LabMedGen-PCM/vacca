@@ -3000,7 +3000,7 @@ def run_test_mode(threads: int, verbose: bool) -> int:
     example_dir = resolve_example_dir()
     cnvs = example_dir / "ClinCNV_output_chr22.tsv"
     vcf = example_dir / "HG00577_example.vcf.gz"
-    alignment = example_dir / "HG00577_example.cram"
+    alignment = example_dir / "HG00577_example_test_run.cram"
     missing = [path for path in (cnvs, vcf, alignment) if not path.is_file()]
     if missing:
         raise ToolError(
